@@ -3,7 +3,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
-COPY data/ ./data/
 RUN mkdir -p ./data
 ENV DB_PATH=data/loads.db
 EXPOSE 8000
