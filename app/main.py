@@ -1,20 +1,29 @@
 from fastapi import FastAPI
-from app.routers import loads, negotiation
+from contextlib import asynccontextmanager
+from app.routers import loads, negotiation, carrier
+from app.database import init_db, insert_data
 
-# Create the main app
+# this runs automatically when the app starts
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()      # creates the tables
+    insert_data()  # inserts the loads
+    yield          # app runs normally after this
+
 app = FastAPI(
     title="Inbound Carrier Sales API",
     description="Backend API for AI-powered inbound carrier load sales",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan  # ← connect the startup function
 )
 
-# Connect routers
-app.include_router(loads.router)        # /search-loads, /find_closest_load
-app.include_router(negotiation.router)  # /negotiate
+app.include_router(carrier.router)
+app.include_router(loads.router)
+app.include_router(negotiation.router)
 
 @app.get("/")
 def root():
-    return {"status": "ok", "message": "Inbound Carrier Sales API is running"}
+    return {"status": "ok", "message": "API is running"}
 
 @app.get("/health")
 def health():
