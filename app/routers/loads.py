@@ -1,148 +1,99 @@
-#search loads
-
+# search loads router
 from pydantic import BaseModel
-from fastapi import FastAPI
+from fastapi import APIRouter
 from app.database import get_connection
+from datetime import datetime
 import math
 import httpx
-import os
 import sqlite3
 
-app = FastAPI()
+# Use APIRouter instead of FastAPI()
+# this gets connected to main.py via app.include_router()
+router = APIRouter()
 
+# --- Coordinate helpers ---
 
-def get_all_coordenates():
+def get_coords_carrier(address: str):
+    """Convert an address string to (lat, lon) using Nominatim."""
+    response = httpx.get(
+        "https://nominatim.openstreetmap.org/search",
+        params={"q": address, "format": "json"},
+        headers={"User-Agent": "carrier-sales-api"}
+    )
+    data = response.json()
+    if not data:
+        return None
+    return data[0]["lat"], data[0]["lon"]
+
+def get_all_coordinates():
+    """Fetch coordinates for all loads and store in COORDINATES table."""
     conn = get_connection()
     cursor = conn.cursor()
-    
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS COORDINATES (
-            load_id          TEXT PRIMARY KEY,
-            origin_lat       FLOAT,
-            origin_lon       FLOAT
+            load_id    TEXT PRIMARY KEY,
+            origin_lat FLOAT,
+            origin_lon FLOAT
         )
     """)
     cursor.execute("SELECT load_id, origin FROM loads")
-    rows = cursor.fetchall()  # returns a list of all rows
+    rows = cursor.fetchall()
     for row in rows:
-        origin = row["origin"]
-        load_id = row["load_id"]
-    
-    # call nominatim for origin
-        response_origin = httpx.get(
-            "https://nominatim.openstreetmap.org/search",
-            params={"q": origin, "format": "json"},
-            headers={"User-Agent": "carrier-sales-api"}
-        )
-        data = response_origin.json()
-
-        if not data:
-            print(f"Could not find coordinates for {origin}")
-            continue
-        
-        lat_origin = data[0]["lat"]
-        lon_origin = data[0]["lon"]
-        
-
-        cursor.execute(
-            "INSERT OR IGNORE INTO COORDINATES VALUES (?, ?, ?)",
-            (load_id, lat_origin, lon_origin)
-        )
-
+        coords = get_coords_carrier(row["origin"])
+        if coords:
+            cursor.execute(
+                "INSERT OR IGNORE INTO COORDINATES VALUES (?, ?, ?)",
+                (row["load_id"], coords[0], coords[1])
+            )
     conn.commit()
     conn.close()
 
 def haversine(lat1, lon1, lat2, lon2):
-    # radius of Earth in miles
+    """Calculate distance in miles between two lat/lon points."""
     R = 3958.8
-    
-    # convert degrees to radians
     lat1, lon1, lat2, lon2 = map(math.radians, [float(lat1), float(lon1), float(lat2), float(lon2)])
-    
-    # haversine formula
     dlat = lat2 - lat1
     dlon = lon2 - lon1
     a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
-    c = 2 * math.asin(math.sqrt(a))
-    
-    return R * c  # returns distance in miles
-# define a Pydantic model
-
-class AddressRequest(BaseModel):
-    address: str
-def get_coords_carrier(address_obj: AddressRequest):
-    address = address_obj.address
-    response_origin = httpx.get(
-            "https://nominatim.openstreetmap.org/search",
-            params={"q": address, "format": "json"},
-            headers={"User-Agent": "carrier-sales-api"}
-        )
-    data = response_origin.json()
-    if not data:
-        return None
-        
-    lat_origin = data[0]["lat"]
-    lon_origin = data[0]["lon"]
-    return lat_origin, lon_origin
-
-
-# 1. Simplifica esta función para que reciba el texto directamente
-def get_coords_carrier(address: str): 
-    # Ya no necesitas 'address_obj.address', usa 'address' directamente
-    response_origin = httpx.get(
-            "https://nominatim.openstreetmap.org/search",
-            params={"q": address, "format": "json"},
-            headers={"User-Agent": "carrier-sales-api"}
-        )
-    data = response_origin.json()
-    if not data:
-        return None
-        
-    return data[0]["lat"], data[0]["lon"]
-
+    return R * 2 * math.asin(math.sqrt(a))
 
 def find_closest_load(address: str, eligible_load_ids: list = None):
+    """Find the closest load to a given address, optionally filtered by eligible IDs."""
     carrier_coords = get_coords_carrier(address)
-    
     if not carrier_coords:
-        return "No se encontraron coordenadas", 0
-        
+        return None, 0
+
     conn = get_connection()
-    # IMPORTANTE: Esto permite usar row["columna"]
-    conn.row_factory = sqlite3.Row 
     cursor = conn.cursor()
+
     if eligible_load_ids:
-        # only search among eligible loads
         placeholders = ",".join("?" * len(eligible_load_ids))
-        cursor.execute(f"SELECT * FROM COORDINATES WHERE load_id IN ({placeholders})", eligible_load_ids)
+        cursor.execute(
+            f"SELECT * FROM COORDINATES WHERE load_id IN ({placeholders})",
+            eligible_load_ids
+        )
     else:
         cursor.execute("SELECT * FROM COORDINATES")
+
     rows = cursor.fetchall()
-    
+    conn.close()
+
     closest = None
     min_distance = float("inf")
-    
+
     for row in rows:
-        # Asegúrate de usar los nombres exactos del CREATE TABLE:
-        # origin_lat y origin_lon
         distance = haversine(
             carrier_coords[0], carrier_coords[1],
-            row["origin_lat"], row["origin_lon"] 
+            row["origin_lat"], row["origin_lon"]
         )
         if distance < min_distance:
             min_distance = distance
             closest = dict(row)
 
-    conn.close()
     return closest, min_distance
 
-class requirements(BaseModel):
-    load_id : str
-    equipment_type: str
-    weight: int
+# --- Requirements checkers ---
 
-
-# group equipment types by family
 EQUIPMENT_FAMILIES = {
     "dry van": ["dry van", "van", "53ft", "48ft"],
     "reefer":  ["reefer", "refrigerated", "temp controlled"],
@@ -155,60 +106,56 @@ def get_equipment_family(equipment: str) -> str:
         for synonym in synonyms:
             if synonym in equipment or equipment in synonym:
                 return family
-    return equipment  # return as-is if no family found
+    return equipment
 
 def check_equipment(carrier_equipment: str, load_equipment: str) -> bool:
-    # compare families instead of exact strings
-    carrier_family = get_equipment_family(carrier_equipment)
-    load_family    = get_equipment_family(load_equipment)
-    return carrier_family == load_family
+    return get_equipment_family(carrier_equipment) == get_equipment_family(load_equipment)
 
 def check_weight(carrier_max_weight: int, load_weight: int) -> bool:
     return carrier_max_weight >= load_weight
 
-from datetime import datetime
-
 def check_availability(carrier_available_date: str, pickup_datetime: str) -> bool:
-    # parse both strings into datetime objects
     carrier_dt = datetime.strptime(carrier_available_date, "%Y-%m-%d %H:%M")
     pickup_dt  = datetime.strptime(pickup_datetime, "%Y-%m-%d %H:%M")
     return carrier_dt <= pickup_dt
 
-def meets_requirements(carrier, load) -> dict:
-    equipment_ok  = check_equipment(carrier["equipment_type"], load["equipment_type"])
-    weight_ok     = check_weight(carrier["max_weight"], load["weight"])
-    available_ok  = check_availability(carrier["available_date"], load["pickup_datetime"])
-    
+def meets_requirements(carrier: dict, load: dict) -> dict:
+    equipment_ok = check_equipment(carrier["equipment_type"], load["equipment_type"])
+    weight_ok    = check_weight(carrier["max_weight"], load["weight"])
+    available_ok = check_availability(carrier["available_date"], load["pickup_datetime"])
     return {
-        "load_id": load["load_id"],
-        "eligible": equipment_ok and weight_ok and available_ok,
+        "load_id":         load["load_id"],
+        "eligible":        equipment_ok and weight_ok and available_ok,
         "equipment_match": equipment_ok,
-        "weight_ok": weight_ok,
-        "available": available_ok
+        "weight_ok":       weight_ok,
+        "available":       available_ok
     }
 
+# --- Pydantic models ---
+
 class SearchLoadsRequest(BaseModel):
-    # carrier location
-    current_location: str      # "49 Washington St, Newark, NJ"
-    # carrier capabilities
-    equipment_type: str        # "Dry Van"
-    max_weight: int            # 44000
-    available_date: str        # "2026-03-21 08:00"
-    
-    # for tracking
-    call_id: str
+    current_location: str   # carrier's current address
+    equipment_type:   str   # "Dry Van", "Reefer", "Flatbed"
+    max_weight:       int   # max weight carrier can handle
+    available_date:   str   # "2026-03-21 08:00"
+    call_id:          str   # for tracking
 
+# --- Endpoints ---
 
-@app.post("/search-loads")
+@router.post("/search-loads")
 def search_loads(request: SearchLoadsRequest):
-
-    # step 1 - filter by requirements
+    """
+    1. Filter loads that meet carrier requirements
+    2. Among eligible loads, find the closest one to carrier
+    """
+    # step 1 - get all loads
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM loads")
     all_loads = cursor.fetchall()
     conn.close()
 
+    # step 2 - filter by requirements
     carrier = {
         "equipment_type": request.equipment_type,
         "max_weight":     request.max_weight,
@@ -223,33 +170,24 @@ def search_loads(request: SearchLoadsRequest):
             eligible_loads.append(load)
 
     if not eligible_loads:
-        return {"found": False, "reason": "No loads match your requirements"}
+        return {"found": False, "reason": "No loads match your equipment and availability"}
 
-    # step 2 - find closest among eligible
+    # step 3 - find closest among eligible
     eligible_ids = [load["load_id"] for load in eligible_loads]
-    closest, distance = find_closest_load(request.current_location, eligible_ids)
+    closest_coords, distance = find_closest_load(request.current_location, eligible_ids)
 
-    if not closest:
+    if not closest_coords:
         return {"found": False, "reason": "Could not calculate distances"}
+
+    # step 4 - get full load details from DB
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM loads WHERE load_id = ?", (closest_coords["load_id"],))
+    full_load = dict(cursor.fetchone())
+    conn.close()
 
     return {
         "found":          True,
-        "load":           closest,
+        "load":           full_load,
         "distance_miles": round(distance, 2)
     }
-
-
-
-if __name__ == "__main__":
-    
-    # fake carrier looking for a load
-    fake_request = SearchLoadsRequest(
-        current_location = "350 Fifth Ave, New York, NY 10118",  # Empire State Building
-        equipment_type   = "Dry Van",
-        max_weight       = 50000,
-        available_date   = "2026-03-23 06:00",
-        call_id          = "test-001"
-    )
-    
-    result = search_loads(fake_request)
-    print(result)

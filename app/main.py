@@ -1,51 +1,21 @@
-# Import FastAPI - this is the framework that creates our API
 from fastapi import FastAPI
+from app.routers import loads, negotiation
 
-# Import BaseModel from pydantic - this lets us define the shape of our data
-from pydantic import BaseModel
+# Create the main app
+app = FastAPI(
+    title="Inbound Carrier Sales API",
+    description="Backend API for AI-powered inbound carrier load sales",
+    version="1.0.0"
+)
 
-# Create the app - this is the main object, everything hangs off this
-app = FastAPI()
+# Connect routers
+app.include_router(loads.router)        # /search-loads, /find_closest_load
+app.include_router(negotiation.router)  # /negotiate
 
-# This is our fake database - a simple dictionary
-# Key = MC number, Value = carrier info
-CARRIERS = {
-    "123456": {"name": "Swift Transport LLC", "status": "ACTIVE", "authorized": True},
-    "234567": {"name": "Eagle Freight Inc",   "status": "ACTIVE", "authorized": True},
-    "999999": {"name": "Blacklisted Carrier", "status": "REVOKED", "authorized": False},
-}
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "Inbound Carrier Sales API is running"}
 
-# This defines the SHAPE of data we expect to receive
-# When HappyRobot calls this endpoint, it must send these two fields
-class CarrierRequest(BaseModel):
-    mc_number: str   # the carrier's ID number
-    call_id: str     # unique ID of the call, so we can track it
-
-# This is the endpoint
-# @app.post means it responds to POST requests
-# "/verify-carrier" is the URL path
-@app.post("/verify-carrier")
-def verify_carrier(request: CarrierRequest):  # request will contain the data HappyRobot sent
-    
-    # Extract the mc_number from the request
-    mc = request.mc_number
-
-    # Check if this MC number exists in our fake database
-    if mc in CARRIERS:
-        carrier = CARRIERS[mc]
-        # Return the carrier info as a dictionary
-        # FastAPI automatically converts this to JSON
-        return {
-            "mc_number": mc,
-            "authorized": carrier["authorized"],
-            "carrier_name": carrier["name"],
-            "status": carrier["status"]
-        }
-    
-    # If MC number not found, return unauthorized
-    return {
-        "mc_number": mc,
-        "authorized": False,
-        "carrier_name": None,
-        "status": "NOT_FOUND"
-    }
+@app.get("/health")
+def health():
+    return {"status": "healthy"}
