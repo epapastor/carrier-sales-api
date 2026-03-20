@@ -1,0 +1,5 @@
+venv/
+data/loads.db
+.env
+__pycache__/
+*.pyc
