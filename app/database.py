@@ -45,6 +45,48 @@ def init_db():
     conn.commit()
     conn.close()
 
+def get_all_coordenates():
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS COORDINATES (
+            load_id          TEXT PRIMARY KEY,
+            origin_lat       FLOAT,
+            origin_lon       FLOAT
+        )
+    """)
+    cursor.execute("SELECT load_id, origin FROM loads")
+    rows = cursor.fetchall()  # returns a list of all rows
+    for row in rows:
+        origin = row["origin"]
+        load_id = row["load_id"]
+    
+    # call nominatim for origin
+        response_origin = httpx.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": origin, "format": "json"},
+            headers={"User-Agent": "carrier-sales-api"}
+        )
+        data = response_origin.json()
+
+        if not data:
+            print(f"Could not find coordinates for {origin}")
+            continue
+        
+        lat_origin = data[0]["lat"]
+        lon_origin = data[0]["lon"]
+        
+
+        cursor.execute(
+            "INSERT OR IGNORE INTO COORDINATES VALUES (?, ?, ?)",
+            (load_id, lat_origin, lon_origin)
+        )
+
+    conn.commit()
+    conn.close()
+
+
 def insert_data():
 
     conn = get_connection()
@@ -168,8 +210,4 @@ def insert_data():
 
 
 
-if __name__ == "__main__":
-    get_connection()
-    init_db()
-    insert_data()
-    obtain_coordenates()
+

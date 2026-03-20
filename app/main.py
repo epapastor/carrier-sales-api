@@ -1,13 +1,14 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from app.routers import loads, negotiation, carrier
-from app.database import init_db, insert_data
+from app.database import init_db, insert_data, get_all_coordenates
 
 # this runs automatically when the app starts
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()      # creates the tables
     insert_data()  # inserts the loads
+    get_all_coordenates()  # fetches coordinates from Nominatim
     yield          # app runs normally after this
 
 app = FastAPI(
