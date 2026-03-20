@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from app.routers import loads, negotiation, carrier
+from app.routers import loads, negotiation, carrier, calls
 from app.database import init_db, insert_data, get_all_coordenates
 
 # this runs automatically when the app starts
@@ -17,7 +17,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan  # ← connect the startup function
 )
-
+app.include_router(calls.router)
 app.include_router(carrier.router)
 app.include_router(loads.router)
 app.include_router(negotiation.router)
