@@ -77,3 +77,14 @@ def log_call(request: LogCallRequest):
     conn.close()
 
     return {"success": True, "call_id": request.call_id}
+
+@router.get("/calls")
+def get_calls(limit: int = 50):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM calls ORDER BY created_at DESC LIMIT ?
+    """, (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    return {"calls": [dict(row) for row in rows]}
