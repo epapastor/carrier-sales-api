@@ -1,12 +1,11 @@
 # negotiation router - Ackerman technique
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from app.database import get_connection
-
+from typing import Union
 router = APIRouter()
 
-FLOOR_PRICE = 0.75  # never go below 75% of loadboard rate
-
+FLOOR_PRICE = 0.75  
 # Ackerman steps - we start low and come up slowly
 # this signals to the carrier we are approaching our limit
 ACKERMAN_STEPS = {
@@ -17,11 +16,44 @@ ACKERMAN_STEPS = {
 }
 
 class NegotiationRequest(BaseModel):
-    call_id:       str    # for tracking
-    load_id:       str    # which load we're negotiating
-    carrier_offer: float  # what the carrier is offering us
-    round:         int    # which round (0, 1, 2, 3)
+    call_id:       str                  # for tracking
+    load_id:       str                  # which load we're negotiating
+    carrier_offer: Union[float, str]    # what the carrier is offering
+    round:         Union[int, str]      # which round (0, 1, 2, 3)
 
+    @field_validator("carrier_offer", mode="before")
+    @classmethod
+    def parse_carrier_offer(cls, v):
+        if v is None or str(v).strip() == "":
+            return 0.0
+        try:
+            return float(str(v).strip())
+        except Exception:
+            return 0.0
+
+    @field_validator("round", mode="before")
+    @classmethod
+    def parse_round(cls, v):
+        if v is None or str(v).strip() == "":
+            return 0
+        try:
+            return int(float(str(v).strip()))
+        except Exception:
+            return 0
+
+    @field_validator("load_id", mode="before")
+    @classmethod
+    def parse_load_id(cls, v):
+        if v is None or str(v).strip() == "":
+            return "LD-015"  # default load
+        return str(v).strip()
+
+    @field_validator("call_id", mode="before")
+    @classmethod
+    def parse_call_id(cls, v):
+        if v is None or str(v).strip() == "":
+            return "unknown"
+        return str(v).strip()
 def get_loadboard_rate(load_id: str) -> float:
     """Get the listed rate for a load from the database."""
     conn = get_connection()
