@@ -1,50 +1,72 @@
-# verify carrier router
 from fastapi import APIRouter
 from pydantic import BaseModel
+import httpx
+import os
 
 router = APIRouter()
 
-# Mock carrier database
-CARRIERS = {
-    "123456": {"name": "Swift Transport LLC", "status": "ACTIVE",   "authorized": True},
-    "234567": {"name": "Eagle Freight Inc",   "status": "ACTIVE",   "authorized": True},
-    "345678": {"name": "Blue Ridge Trucking", "status": "INACTIVE", "authorized": False},
-    "999999": {"name": "Blacklisted Carrier", "status": "REVOKED",  "authorized": False},
-}
+# get FMCSA key from environment variable
+FMCSA_API_KEY = os.getenv("FMCSA_API_KEY", "")
 
 class CarrierRequest(BaseModel):
-    mc_number: str  # carrier's MC number
-    call_id:   str  # unique call ID for tracking
+    mc_number: str
+    call_id:   str
+
+async def verify_with_fmcsa(mc: str) -> dict:
+    """Call real FMCSA API."""
+    url = f"https://mobile.fmcsa.dot.gov/qc/services/carriers/{mc}?webKey={FMCSA_API_KEY}"
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        response = await client.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            carrier = data.get("content", {}).get("carrier", {})
+            allowed = carrier.get("allowedToOperate", "N")
+            return {
+                "authorized":   allowed == "Y",
+                "carrier_name": carrier.get("legalName", "Unknown"),
+                "status":       carrier.get("statusCode", "UNKNOWN")
+            }
+    return None
+
+def verify_with_mock(mc: str) -> dict:
+    """Fallback mock if FMCSA key not available or call fails."""
+    CARRIERS = {
+    "123456": {"authorized": True,  "name": "Swift Transport LLC",  "status": "ACTIVE"},
+    "234567": {"authorized": True,  "name": "Eagle Freight Inc",    "status": "ACTIVE"},
+    "345678": {"authorized": False, "name": "Blue Ridge Trucking",  "status": "INACTIVE"},
+    "999999": {"authorized": False, "name": "Blacklisted Carrier",  "status": "REVOKED"},
+    }
+    if mc in CARRIERS:
+        c = CARRIERS[mc]
+        return {"authorized": c["authorized"], "carrier_name": c["name"], "status": c["status"]}
+    
+    return {"authorized": False, "carrier_name": None, "status": "NOT_FOUND"}
 
 @router.post("/verify-carrier")
-def verify_carrier(request: CarrierRequest):
-    """Verify if a carrier is authorized to work with us via FMCSA (mocked)."""
-    mc = request.mc_number.strip()
+async def verify_carrier(request: CarrierRequest):
+    """
+    Verify carrier MC number.
+    Uses real FMCSA API if key is available, falls back to mock.
+    """
+    mc = request.mc_number.strip().replace("MC", "").replace("-", "")
 
-    if mc in CARRIERS:
-        carrier = CARRIERS[mc]
-        return {
-            "mc_number":    mc,
-            "authorized":   carrier["authorized"],
-            "carrier_name": carrier["name"],
-            "status":       carrier["status"],
-            "reason":       None if carrier["authorized"] else f"Carrier status is {carrier['status']}"
-        }
+    result = None
 
-    # default: if numeric and 5+ digits → treat as valid
-    if mc.isdigit() and len(mc) >= 5:
-        return {
-            "mc_number":    mc,
-            "authorized":   True,
-            "carrier_name": f"Carrier MC#{mc}",
-            "status":       "ACTIVE",
-            "reason":       None
-        }
+    # try real FMCSA first if key exists
+    if FMCSA_API_KEY:
+        try:
+            result = await verify_with_fmcsa(mc)
+        except Exception:
+            pass  # fall back to mock if FMCSA fails
+
+    # fall back to mock
+    if result is None:
+        result = verify_with_mock(mc)
 
     return {
         "mc_number":    mc,
-        "authorized":   False,
-        "carrier_name": None,
-        "status":       "NOT_FOUND",
-        "reason":       "MC number not found in FMCSA database"
+        "authorized":   result["authorized"],
+        "carrier_name": result["carrier_name"],
+        "status":       result["status"],
+        "reason":       None if result["authorized"] else f"Carrier status: {result['status']}"
     }
