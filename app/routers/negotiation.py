@@ -55,7 +55,7 @@ def evaluate_carrier_offer(carrier_offer: float, our_current_offer: float, loadb
     else:
         return "counter"
 
-@router.post("/negotiate")
+
 @router.post("/negotiate")
 def negotiate(request: NegotiationRequest):
     """
