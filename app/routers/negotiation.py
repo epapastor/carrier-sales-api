@@ -56,24 +56,28 @@ def evaluate_carrier_offer(carrier_offer: float, our_current_offer: float, loadb
         return "counter"
 
 @router.post("/negotiate")
+@router.post("/negotiate")
 def negotiate(request: NegotiationRequest):
     """
-    Evaluate carrier's offer and respond with accept, counter or reject.
-    HappyRobot calls this once per negotiation round.
+    Always returns the same keys:
+    - decision, message, final_price, our_offer, round
     """
     # step 1 - get loadboard rate
     loadboard_rate = get_loadboard_rate(request.load_id)
 
-    # step 2 - what is our current offer for this round?
+    # step 2 - our current offer for this round
     our_current_offer = calculate_our_offer(request.round, loadboard_rate)
 
     if our_current_offer is None:
         return {
-            "decision": "reject",
-            "message":  "We've reached our limit. Thank you for your time."
+            "decision":    "reject",
+            "message":     "We've reached our limit. Thank you for your time.",
+            "final_price": None,
+            "our_offer":   None,
+            "round":       request.round
         }
 
-    # step 3 - evaluate carrier's offer against ours
+    # step 3 - evaluate
     decision = evaluate_carrier_offer(
         request.carrier_offer,
         our_current_offer,
@@ -83,29 +87,40 @@ def negotiate(request: NegotiationRequest):
     if decision == "accept":
         return {
             "decision":    "accept",
+            "message":     "We have a deal! Transfer was successful, "
+                          "you can now wrap up the conversation.",
             "final_price": request.carrier_offer,
-            "message":     "We have a deal! Transfer was successful, you can now wrap up the conversation."
+            "our_offer":   our_current_offer,
+            "round":       request.round
         }
 
     if decision == "reject":
         return {
-            "decision": "reject",
-            "message":  f"Unfortunately we can't go below ${loadboard_rate * FLOOR_PRICE:,.2f}. Have a good day!"
+            "decision":    "reject",
+            "message":     f"Unfortunately we can't go below "
+                          f"${loadboard_rate * FLOOR_PRICE:,.2f}. Have a good day!",
+            "final_price": None,
+            "our_offer":   None,
+            "round":       request.round
         }
 
-    # counter - next round
+    # counter
     next_round = request.round + 1
     next_offer = calculate_our_offer(next_round, loadboard_rate)
 
     if next_offer is None:
         return {
-            "decision": "reject",
-            "message":  "We've reached our final offer. Thank you for your time."
+            "decision":    "reject",
+            "message":     "We've reached our final offer. Thank you for your time.",
+            "final_price": None,
+            "our_offer":   None,
+            "round":       next_round
         }
 
     return {
-        "decision":  "counter",
-        "our_offer": next_offer,
-        "round":     next_round,
-        "message":   f"Best I can do is ${next_offer:,.2f}. What do you say?"
+        "decision":    "counter",
+        "message":     f"Best I can do is ${next_offer:,.2f}. What do you say?",
+        "final_price": None,
+        "our_offer":   next_offer,
+        "round":       next_round
     }

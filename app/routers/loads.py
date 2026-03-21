@@ -265,11 +265,12 @@ def search_loads(request: SearchLoadsRequest):
     closest, distance = find_closest_load(request.current_location, eligible_ids)
 
     if not closest:
-        return {"found": False, "reason": "Could not calculate distances"}
+        return {"found": False, "load": None, "load_id": None, "distance_miles": round(distance, 2) }
 
     return {
-        "found":          True,
-        "load":           closest,
+        "found": True,
+        "load": closest, 
+        "load_id":  closest.get("load_id"),
         "distance_miles": round(distance, 2)
     }
 
