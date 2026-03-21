@@ -258,20 +258,21 @@ def search_loads(request: SearchLoadsRequest):
             eligible_loads.append(load)
 
     if not eligible_loads:
-        return {"found": False, "reason": "No loads match your requirements"}
+        return {"found": False, "load": None, "load_id": None, "distance_miles": None ,"reason": "No loads match your requirements"}
 
     # step 2 - find closest among eligible
     eligible_ids = [load["load_id"] for load in eligible_loads]
     closest, distance = find_closest_load(request.current_location, eligible_ids)
 
     if not closest:
-        return {"found": False, "load": None, "load_id": None, "distance_miles": round(distance, 2) }
+        return {"found": False, "load": None, "load_id": None, "distance_miles": None , "reason": None}
 
     return {
         "found": True,
         "load": closest, 
         "load_id":  closest.get("load_id"),
-        "distance_miles": round(distance, 2)
+        "distance_miles": round(distance, 2),
+        "reason": None
     }
 
 
