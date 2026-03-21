@@ -1,7 +1,6 @@
 #search loads
-
+from fastapi import APIRouter
 from pydantic import BaseModel, validator
-from fastapi import FastAPI
 from app.database import get_connection
 import math
 import httpx
@@ -9,7 +8,9 @@ import os
 import sqlite3
 from datetime import datetime
 from typing import Union
-app = FastAPI()
+
+
+router = APIRouter()
 class SearchLoadsRequest(BaseModel):
     current_location: str
     equipment_type:   str
@@ -212,7 +213,7 @@ class SearchLoadsRequest(BaseModel):
     call_id: str
 
 
-@app.post("/search-loads")
+@router.post("/search-loads")
 def search_loads(request: SearchLoadsRequest):
 
     # step 1 - filter by requirements
