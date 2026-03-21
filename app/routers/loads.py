@@ -233,17 +233,6 @@ def meets_requirements(carrier, load) -> dict:
         "available": available_ok
     }
 
-class SearchLoadsRequest(BaseModel):
-    # carrier location
-    current_location: str      # "49 Washington St, Newark, NJ"
-    # carrier capabilities
-    equipment_type: str        # "Dry Van"
-    max_weight: int            # 44000
-    available_date: str        # "2026-03-21 08:00"
-    
-    # for tracking
-    call_id: str
-
 
 @router.post("/search-loads")
 def search_loads(request: SearchLoadsRequest):
@@ -286,16 +275,3 @@ def search_loads(request: SearchLoadsRequest):
 
 
 
-if __name__ == "__main__":
-    
-    # fake carrier looking for a load
-    fake_request = SearchLoadsRequest(
-        current_location = "350 Fifth Ave, New York, NY 10118",  # Empire State Building
-        equipment_type   = "Dry Van",
-        max_weight       = 50000,
-        available_date   = "2026-03-23 06:00",
-        call_id          = "test-001"
-    )
-    
-    result = search_loads(fake_request)
-    print(result)
