@@ -104,7 +104,7 @@ def negotiate(request: NegotiationRequest):
             "message":     "We've reached our limit. Thank you for your time.",
             "final_price": None,
             "our_offer":   None,
-            "round_left":       request.round
+            "round_left":       0
         }
 
     # step 3 - evaluate
@@ -121,7 +121,7 @@ def negotiate(request: NegotiationRequest):
                           "you can now wrap up the conversation.",
             "final_price": request.carrier_offer,
             "our_offer":   our_current_offer,
-            "round_left":       request.round
+            "round_left":       0
         }
 
     if decision == "reject":
@@ -131,7 +131,7 @@ def negotiate(request: NegotiationRequest):
                           f"${loadboard_rate * FLOOR_PRICE:,.2f}. Have a good day!",
             "final_price": None,
             "our_offer":   None,
-            "round_left":       request.round
+            "round_left":  0
         }
 
     # counter
@@ -144,7 +144,7 @@ def negotiate(request: NegotiationRequest):
             "message":     "We've reached our final offer. Thank you for your time.",
             "final_price": None,
             "our_offer":   None,
-            "round_left":       next_round
+            "round_left":   0
         }
 
     return {
