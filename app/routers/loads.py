@@ -23,7 +23,7 @@ class SearchLoadsRequest(BaseModel):
         try:
             return int(float(str(v).strip()))
         except:
-            return 44000  # default if parsing fails
+            return 0  # default if parsing fails
 
 def get_all_coordenates():
     conn = get_connection()
@@ -182,12 +182,40 @@ def check_weight(carrier_max_weight: int, load_weight: int) -> bool:
 
 
 
-def check_availability(carrier_available_date: str, pickup_datetime: str) -> bool:
-    # parse both strings into datetime objects
-    carrier_dt = datetime.strptime(carrier_available_date, "%Y-%m-%d %H:%M")
-    pickup_dt  = datetime.strptime(pickup_datetime, "%Y-%m-%d %H:%M")
-    return carrier_dt <= pickup_dt
+from datetime import datetime
 
+def check_availability(carrier_available_date: str, pickup_datetime: str) -> bool:
+    # try multiple date formats
+    formats = [
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%m/%d/%Y %H:%M",
+        "%Y-%m-%d",
+    ]
+    
+    carrier_dt = None
+    pickup_dt  = None
+    
+    for fmt in formats:
+        try:
+            carrier_dt = datetime.strptime(carrier_available_date, fmt)
+            break
+        except:
+            continue
+    
+    for fmt in formats:
+        try:
+            pickup_dt = datetime.strptime(pickup_datetime, fmt)
+            break
+        except:
+            continue
+    
+    # if we can't parse → assume available
+    if not carrier_dt or not pickup_dt:
+        return True
+    
+    return carrier_dt <= pickup_dt
 def meets_requirements(carrier, load) -> dict:
     equipment_ok  = check_equipment(carrier["equipment_type"], load["equipment_type"])
     weight_ok     = check_weight(carrier["max_weight"], load["weight"])
