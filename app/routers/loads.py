@@ -182,10 +182,9 @@ def check_weight(carrier_max_weight: int, load_weight: int) -> bool:
 
 
 
-from datetime import datetime
 
 def check_availability(carrier_available_date: str, pickup_datetime: str) -> bool:
-    # try multiple date formats
+    """Check if carrier is available before pickup time."""
     formats = [
         "%Y-%m-%d %H:%M",
         "%Y-%m-%dT%H:%M:%S",
@@ -199,23 +198,28 @@ def check_availability(carrier_available_date: str, pickup_datetime: str) -> boo
     
     for fmt in formats:
         try:
-            carrier_dt = datetime.strptime(carrier_available_date, fmt)
+            carrier_dt = datetime.strptime(
+                str(carrier_available_date).strip(), fmt
+            )
             break
-        except:
+        except Exception:
             continue
     
     for fmt in formats:
         try:
-            pickup_dt = datetime.strptime(pickup_datetime, fmt)
+            pickup_dt = datetime.strptime(
+                str(pickup_datetime).strip(), fmt
+            )
             break
-        except:
+        except Exception:
             continue
     
-    # if we can't parse → assume available
+    # if we can't parse either date → assume available
     if not carrier_dt or not pickup_dt:
         return True
     
     return carrier_dt <= pickup_dt
+
 def meets_requirements(carrier, load) -> dict:
     equipment_ok  = check_equipment(carrier["equipment_type"], load["equipment_type"])
     weight_ok     = check_weight(carrier["max_weight"], load["weight"])
