@@ -3,21 +3,24 @@ from fastapi import APIRouter
 from pydantic import BaseModel, field_validator
 from app.database import get_connection
 from typing import Union
+
 router = APIRouter()
 
-FLOOR_PRICE = 0.75  
+# we never pay more than the loadboard rate
+CEILING_PRICE = 1.5
+
 # Ackerman steps - we start low and come up slowly
-# this signals to the carrier we are approaching our limit
 ACKERMAN_STEPS = {
     3: 0.80,   # anchor - our first offer (80% of loadboard)
-    2: 0.90,   # round 2 - big jump up
-    1: 0.995,   # round 1 - smaller jump
+    2: 0.90,   # round 2 - come up to 90%
+    1: 0.995,  # round 1 - almost full rate (Ackerman precise number)
 }
+
 class NegotiationRequest(BaseModel):
-    call_id:       str                  # for tracking
-    load_id:       str                  # which load we're negotiating
-    carrier_offer: Union[float, str]    # what the carrier is offering
-    round_left:         Union[int, str]      # which round (0, 1, 2, 3)
+    call_id:       str
+    load_id:       str
+    carrier_offer: Union[float, str]
+    round_left:    Union[int, str]
 
     @field_validator("carrier_offer", mode="before")
     @classmethod
@@ -43,7 +46,7 @@ class NegotiationRequest(BaseModel):
     @classmethod
     def parse_load_id(cls, v):
         if v is None or str(v).strip() == "":
-            return "LD-015"  # default load
+            return "LD-015"
         return str(v).strip()
 
     @field_validator("call_id", mode="before")
@@ -52,51 +55,65 @@ class NegotiationRequest(BaseModel):
         if v is None or str(v).strip() == "":
             return "unknown"
         return str(v).strip()
+
 def get_loadboard_rate(load_id: str) -> float:
     """Get the listed rate for a load from the database."""
-    conn = get_connection()
+    conn   = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT loadboard_rate FROM loads WHERE load_id = ?", (load_id,))
+    cursor.execute(
+        "SELECT loadboard_rate FROM loads WHERE load_id = ?",
+        (load_id,)
+    )
     row = cursor.fetchone()
     conn.close()
+    if not row:
+        return 2400.0  # default rate
     return row["loadboard_rate"]
 
 def calculate_our_offer(round_number: int, loadboard_rate: float):
-    """Calculate our counter offer for this round using Ackerman steps."""
+    """Calculate our offer for this round using Ackerman steps."""
     percentage = ACKERMAN_STEPS.get(round_number)
     if percentage is None:
-        return None  # no more rounds
+        return None
     return round(loadboard_rate * percentage, 2)
 
-def evaluate_carrier_offer(carrier_offer: float, our_current_offer: float, loadboard_rate: float) -> str:
+def evaluate_carrier_offer(
+    carrier_offer:     float,
+    our_current_offer: float,
+    loadboard_rate:    float
+) -> str:
     """
-    Decide whether to accept, counter or reject carrier's offer.
-    - carrier meets or beats our current offer → accept
-    - carrier is below floor price → reject  
-    - in between → counter
+    Broker wants to pay carrier as LITTLE as possible.
+    - carrier accepts our offer or lower → accept
+    - carrier demands more than loadboard rate → reject
+    - in between → counter with slightly higher offer
     """
-    # carrier met our price → accept
-    if carrier_offer >= our_current_offer:
+    # carrier accepts our price or asks for less → accept
+    if carrier_offer <= our_current_offer:
         return "accept"
-    # carrier is too low → reject
-    elif carrier_offer < loadboard_rate * FLOOR_PRICE:
+
+    # carrier demands more than loadboard rate → reject
+    elif carrier_offer > loadboard_rate * CEILING_PRICE:
         return "reject"
-    # in between → keep negotiating
+
+    # carrier wants more but below ceiling → counter
     else:
         return "counter"
-
 
 @router.post("/negotiate")
 def negotiate(request: NegotiationRequest):
     """
     Always returns the same keys:
-    - decision, message, final_price, our_offer, round
+    decision, message, final_price, our_offer, round_left
     """
     # step 1 - get loadboard rate
     loadboard_rate = get_loadboard_rate(request.load_id)
 
     # step 2 - our current offer for this round
-    our_current_offer = calculate_our_offer(request.round_left, loadboard_rate)
+    our_current_offer = calculate_our_offer(
+        request.round_left,
+        loadboard_rate
+    )
 
     if our_current_offer is None:
         return {
@@ -104,10 +121,10 @@ def negotiate(request: NegotiationRequest):
             "message":     "We've reached our limit. Thank you for your time.",
             "final_price": None,
             "our_offer":   None,
-            "round_left":       0
+            "round_left":  0
         }
 
-    # step 3 - evaluate
+    # step 3 - evaluate carrier's offer
     decision = evaluate_carrier_offer(
         request.carrier_offer,
         our_current_offer,
@@ -121,21 +138,21 @@ def negotiate(request: NegotiationRequest):
                           "you can now wrap up the conversation.",
             "final_price": request.carrier_offer,
             "our_offer":   our_current_offer,
-            "round_left":       0
+            "round_left":  0
         }
 
     if decision == "reject":
         return {
             "decision":    "reject",
-            "message":     f"Unfortunately we can't go below "
-                          f"${loadboard_rate * FLOOR_PRICE:,.2f}. Have a good day!",
+            "message":     f"Unfortunately we can't go above "
+                          f"${loadboard_rate:,.2f}. Have a good day!",
             "final_price": None,
             "our_offer":   None,
             "round_left":  0
         }
 
-    # counter
-    next_round = request.round - 1
+    # counter - move to next round
+    next_round = request.round_left - 1
     next_offer = calculate_our_offer(next_round, loadboard_rate)
 
     if next_offer is None or next_round < 0:
@@ -144,7 +161,7 @@ def negotiate(request: NegotiationRequest):
             "message":     "We've reached our final offer. Thank you for your time.",
             "final_price": None,
             "our_offer":   None,
-            "round_left":   0
+            "round_left":  0
         }
 
     return {
